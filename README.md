@@ -1,80 +1,58 @@
 # Twisted Services
 
-Twisted Services is a Slack bot + HTTP API for the Hack Club YSWS **Jus' Study**.
+Twisted Services is a FastAPI application that receives Slack events and
+provides the `/twisted-ping` Slack command for posting announcements to
+channels.
 
-It provides a small FastAPI server that:
-- Receives Slack Events at `POST /slack/events`
-- Lets trusted clients “ship” projects and send review outcomes via authenticated API endpoints
-- Sends fulfillment / order status updates via DMs
+## Current features
 
-## Features
+- `GET /healthz` returns `{"status":"ok"}`.
+- `POST /slack/events` receives requests from Slack through Slack Bolt.
+- The `/twisted-ping` Slack command posts a message to the current channel.
+  The command is available only to the channel creator, except in the
+  configured exempt channels.
+- Errors can be posted to a Slack logging channel when `LOGGING_CHANNEL_ID`
+  is configured.
+- A heartbeat message can be posted to the logging channel every 24 hours when
+  `LOGGING_CHANNEL_ID` is configured.
 
-- **Health check** endpoint (`GET /healthz`).
-- **Slack Events** receiver (`POST /slack/events`) using Slack Bolt.
-- **Project shipping** (`POST /ship`) posts to a ship channel + DMs the submitter.
-- **Project review** endpoints:
-  - `POST /review-accept`
-  - `POST /review-reject`
-  These fetch the reviewer’s Slack profile and post a “spoofed” channel message using the reviewer’s display name + avatar, then DM the submitter with feedback.
-- **Order fulfillment DM updates**:
-  - `POST /fulfill_pending`
-  - `POST /fulfill_approved`
-  - `POST /fulfill_reject`
-  - `POST /fulfill_fullfilled`
-- **Custom message relay** (`POST /custom`) to a user DM (`U…`) or channel (`C…`/`G…`).
-- Optional **heartbeat logging**: if `LOGGING_CHANNEL_ID` is set, the bot posts `Bot is online!` every 5 minutes.
+## Configuration
 
-## Authentication
+The application reads real environment variables first. If a variable is not
+set, it loads missing values from a local `.env` file. Start with
+[`.env.sample`](./.env.sample), but replace all placeholder values before
+running the application.
 
-All non-Slack endpoints (everything except `GET /healthz` and `POST /slack/events`) require a bearer token:
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `APP_NAME` | No | `Twisted Services` | FastAPI application name. |
+| `API_HOST` | No | `0.0.0.0` | Host used by the built-in Uvicorn server. |
+| `API_PORT` | No | `8000` | Port used by the built-in Uvicorn server. |
+| `SLACK_BOT_TOKEN` | Yes | — | Slack bot token, usually beginning with `xoxb-`. |
+| `SLACK_SIGNING_SECRET` | Recommended | — | Used by Slack Bolt to verify Slack requests. Without it, signed requests are acknowledged but cannot be verified. |
+| `LOGGING_CHANNEL_ID` | No | — | Slack channel for error logs and the daily heartbeat. |
+| `LOGGING_CC_USER_ID` | No | — | Optional Slack user ID to mention in error-log threads. |
 
-- Header: `Authorization: Bearer <token>`
-- The server compares `<token>` to the configured `AUTH_BEARER_TOKEN`.
+`AUTH_BEARER_TOKEN`, `SHIP_CHANNEL_ID`, and `MASTER_LOGGING_CHANNEL_ID` are
+retained for compatibility but are not used by any currently exposed
+endpoint.
 
-## Configuration (Environment Variables)
+## Run locally
 
-The server prefers real environment variables. If a key is missing, it will try to load it from a local `.env` file (see `.env.sample`).
-
-Required for full functionality:
-- `AUTH_BEARER_TOKEN`
-- `SLACK_BOT_TOKEN`
-- `SLACK_SIGNING_SECRET`
-- `SHIP_CHANNEL_ID`
-
-Optional:
-- `APP_NAME` (default: `Twisted Services`)
-- `API_HOST` (default: `0.0.0.0`)
-- `API_PORT` (default: `8000`)
-- `LOGGING_CHANNEL_ID` (enables heartbeat)
-
-## Run locally (Linux/macOS)
-
-1) Create a virtualenv and install dependencies:
+### Linux and macOS
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-```
 
-2) Configure environment variables:
-
-```bash
 cp .env.sample .env
-# edit .env with your real values
-```
+# Edit .env with your Slack credentials and channel IDs.
 
-3) Start the server:
-
-```bash
 python twisted_services/main.py
 ```
 
-Server listens on `http://API_HOST:API_PORT` (defaults to `http://0.0.0.0:8000`).
-
-## Run locally (Windows)
-
-PowerShell:
+### Windows PowerShell
 
 ```powershell
 py -m venv .venv
@@ -82,36 +60,17 @@ py -m venv .venv
 pip install -r requirements.txt
 
 copy .env.sample .env
-# edit .env with your real values
+# Edit .env with your Slack credentials and channel IDs.
 
 py .\twisted_services\main.py
 ```
 
-If you don’t want to use `.env`, you can set environment variables directly:
+The server listens on `http://127.0.0.1:8000` by default. `API_HOST` and
+`API_PORT` control the bind address and port.
 
-```powershell
-$env:AUTH_BEARER_TOKEN = "replace-me"
-$env:SLACK_BOT_TOKEN = "xoxb-..."
-$env:SLACK_SIGNING_SECRET = "..."
-$env:SHIP_CHANNEL_ID = "C..."
-py .\twisted_services\main.py
-```
+## Run with Uvicorn
 
-## Deploy (production)
-
-Minimal production guidance:
-
-- Put the server behind HTTPS (reverse proxy like Nginx/Caddy) if it’s reachable from the internet.
-- Store secrets in your hosting provider’s secret manager / environment configuration.
-- Ensure `SLACK_SIGNING_SECRET` is set so Slack requests can be verified.
-
-Typical start command (works anywhere you can run Python):
-
-```bash
-python twisted_services/main.py
-```
-
-You can also run via Uvicorn directly:
+The application can also be started with Uvicorn directly:
 
 ```bash
 uvicorn twisted_services.main:app --host 0.0.0.0 --port 8000
@@ -122,171 +81,80 @@ uvicorn twisted_services.main:app --host 0.0.0.0 --port 8000
 Build the image:
 
 ```bash
-docker build -t m_alc .
+docker build -t twisted-services .
 ```
 
-Run the container:
+Run it with the required Slack settings:
 
 ```bash
-docker run -d -p 8000:8000 --restart always --name my-bot-service \
-  -e AUTH_BEARER_TOKEN="$AUTH_BEARER_TOKEN" \
+docker run --rm -p 8000:8000 \
   -e SLACK_BOT_TOKEN="$SLACK_BOT_TOKEN" \
   -e SLACK_SIGNING_SECRET="$SLACK_SIGNING_SECRET" \
-  -e SHIP_CHANNEL_ID="$SHIP_CHANNEL_ID" \
   -e LOGGING_CHANNEL_ID="$LOGGING_CHANNEL_ID" \
-  m_alc
+  -e LOGGING_CC_USER_ID="$LOGGING_CC_USER_ID" \
+  twisted-services
 ```
 
-View logs:
+## HTTP endpoints
+
+### `GET /healthz`
+
+This endpoint does not require authentication:
 
 ```bash
-docker logs my-bot-service
+curl -sS http://127.0.0.1:8000/healthz
 ```
 
-## API
+Expected response:
 
-Base URL in examples:
-
-```bash
-BASE_URL="http://${API_HOST:-0.0.0.0}:${API_PORT:-8000}"
-AUTH="${AUTH_BEARER_TOKEN}"
+```json
+{"status":"ok"}
 ```
 
-### GET /healthz
+### `POST /slack/events`
 
-```bash
-curl -sS "$BASE_URL/healthz"
-```
+Slack calls this endpoint for URL verification, slash commands, actions, and
+events. Requests should be sent by Slack with
+`X-Slack-Request-Timestamp` and `X-Slack-Signature` headers.
 
-### POST /slack/events
+When `SLACK_SIGNING_SECRET` is configured, Slack Bolt verifies the request.
+When it is missing, unsigned requests receive `503`; requests that include
+Slack signature headers are acknowledged with `200` so Slack does not retry
+them.
 
-This endpoint is called by Slack. Slack signs requests; a plain `curl` without a correct `X-Slack-Signature` will not work.
-The handler always acknowledges with HTTP 200 to prevent Slack retries.
+For URL verification, Slack Bolt returns the challenge response. A plain
+`curl` request is not a valid Slack request unless it includes a matching
+signature.
 
-To test it locally, use the provided test script with `--test-slack-events`.
+## Slack app setup
 
-### POST /ship
+Configure the Slack app to:
 
-```bash
-curl -sS -X POST "$BASE_URL/ship" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"U123ABCD","project_name":"Awesome Widget","project_link":"https://example.com"}'
-```
+1. Set the **Request URL** for events and slash commands to
+   `https://your-host.example/slack/events`.
+2. Subscribe to the `app_mention` event if mention logging is required.
+3. Create the `/twisted-ping` slash command with the same request URL.
+4. Grant the bot the permissions required to read channel membership and post
+   messages.
+5. Put the bot token and signing secret in the environment, not in source
+   control.
 
-### POST /review-accept
-
-```bash
-curl -sS -X POST "$BASE_URL/review-accept" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id":"U123ABCD",
-    "project_name":"Awesome Widget",
-    "project_link":"https://example.com",
-    "reviewer_id":"U987ZYXW",
-    "feedback":"Excellent implementation.",
-    "currencies":"100 Gold, 50 Silver"
-  }'
-```
-
-### POST /review-reject
-
-```bash
-curl -sS -X POST "$BASE_URL/review-reject" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id":"U123ABCD",
-    "project_name":"Awesome Widget",
-    "project_link":"https://example.com",
-    "reviewer_id":"U987ZYXW",
-    "feedback":"Please revise and resubmit."
-  }'
-```
-
-### POST /fulfill_pending
-
-```bash
-curl -sS -X POST "$BASE_URL/fulfill_pending" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"U123ABCD","order_id":"1001","item_name":"Shiny Relic","qty":"1","cost":"67 potions"}'
-```
-
-### POST /fulfill_approved
-
-```bash
-curl -sS -X POST "$BASE_URL/fulfill_approved" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"U123ABCD","order_id":"1002","item_name":"Shiny Relic","qty":"1","cost":"67 potions"}'
-```
-
-### POST /fulfill_reject
-
-```bash
-curl -sS -X POST "$BASE_URL/fulfill_reject" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"U123ABCD","order_id":"1002","item_name":"Shiny Relic","qty":"1","cost":"67 potions","comment":"Out of stock this week."}'
-```
-
-### POST /fulfill_fullfilled
-
-```bash
-curl -sS -X POST "$BASE_URL/fulfill_fullfilled" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id":"U123ABCD",
-    "order_id":"1003",
-    "item_name":"Shiny Relic",
-    "qty":"1",
-    "cost":"67 potions",
-    "fulfilled_by":"The Utkarsh",
-    "tracking_details":"Tracking #TRACK-1003"
-  }'
-```
-
-### POST /custom
-
-Send to a user (DM):
-
-```bash
-curl -sS -X POST "$BASE_URL/custom" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"target_id":"U123ABCD","message":"Hello!"}'
-```
-
-Send to a channel:
-
-```bash
-curl -sS -X POST "$BASE_URL/custom" \
-  -H "Authorization: Bearer $AUTH" \
-  -H "Content-Type: application/json" \
-  -d '{"target_id":"C12345678","message":"Hello channel!"}'
-```
+Use `/twisted-ping here message` to notify the current channel with an
+`@here` mention. Any other first argument produces an `@channel` mention.
+The command can be used by the channel creator, or in one of the exempt
+channels defined in `twisted_services/main.py`.
 
 ## Endpoint test scripts
 
-- Linux/macOS (Bash): `./test_endpoints.sh` or the compatibility wrapper `./test_endpoint.sh`
-- Windows (PowerShell): `./test_endpoints.ps1`
+`test_endpoints.sh`, `test_endpoints.ps1`, and `test_endpoint.sh` are retained
+as legacy scripts for the former shipping and fulfillment API. They target
+endpoints that are not exposed by the current application and should not be
+used as health checks for this version. Use `/healthz` to verify that the
+server is running.
 
-Examples:
+## Security
 
-```bash
-./test_endpoints.sh --base-url http://127.0.0.1:8000 --auth-token "$AUTH" U_REVIEWER U_USER1 U_USER2
-```
-
-To include Slack Events testing:
-
-```bash
-./test_endpoints.sh --base-url http://127.0.0.1:8000 --auth-token "$AUTH" --test-slack-events --slack-signing-secret "$SLACK_SIGNING_SECRET" U_REVIEWER U_USER1
-```
-
-## Security notes
-
-- Treat `AUTH_BEARER_TOKEN`, `SLACK_BOT_TOKEN`, and `SLACK_SIGNING_SECRET` as secrets.
-- Anyone with the bearer token can post messages via this API.
+- Keep `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secret.
+- Put the application behind HTTPS when it is reachable from the internet.
+- Restrict access to the logging channel and use the least-privileged Slack
+  scopes needed by the bot.

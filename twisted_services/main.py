@@ -184,6 +184,7 @@ class SlackRelay:
 		"C02185NHSFK", #pingus-pongus
 		"C0BLMQVEWKA", #twisted-dev
 		"C0AD3HRV4F8", #twisters
+		"C0BR0LLL7G9", #twistwrights
 	]
 
 	def __init__(self, settings: Settings) -> None:
